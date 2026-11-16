@@ -102,7 +102,9 @@ class OpenRouterTextModel:
                 " `OPENROUTER_API_KEY=...` in ~/.config/lore/openrouter.env with"
                 " mode 600.", provider=OPENROUTER)
         self._key = api_key
-        self._base_url = base_url.rstrip("/")
+        # "" (no base_url anywhere) must fall back to OpenRouter's own: an
+        # empty httpx base_url raises UnsupportedProtocol on every request.
+        self._base_url = (base_url or BASE_URL).rstrip("/")
         self._concurrency = max(1, concurrency)
         self._max_tokens = max_tokens
         self.model = order[0]

@@ -172,6 +172,16 @@ def test_a_key_is_required():
         OpenRouterTextModel(None, models=("m",))
 
 
+def test_an_empty_base_url_chat_falls_back_to_openrouter():
+    """`[lore.llm] base_url` is empty by default: the client must still reach
+    the real endpoint, not raise UnsupportedProtocol on every request."""
+    server = Server(completion("ok"))
+    m = OpenRouterTextModel(KEY, models=("m/one",), base_url="",
+                            transport=httpx.MockTransport(server))
+    assert run(m.generate("hi")) == "ok"
+    assert str(server.requests[0].url) == f"{BASE}/chat/completions"
+
+
 # --- keys and the factory -------------------------------------------------------
 
 def _config(tmp_path, **llm):
