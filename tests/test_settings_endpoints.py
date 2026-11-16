@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import uuid
 import zipfile
 from datetime import timedelta
@@ -298,9 +299,11 @@ def test_mcp_setup_snippets_use_the_real_command_and_library(local):
     desktop = json.loads(body["claude_desktop"])
     assert desktop == {"mcpServers": {"lore": {"command": str(exe), "args": ["mcp"],
                                                "env": {"LORE_DATA_DIR": data_dir}}}}
+    expected_exe = f"'{exe}'" if (" " in str(exe) or os.name == "nt") else str(exe)
     assert body["claude_code"] == (f"claude mcp add --scope user lore "
-                                   f"-e 'LORE_DATA_DIR={data_dir}' -- {exe} mcp")
-    assert body["http_command"] == f"LORE_DATA_DIR='{data_dir}' {exe} mcp --http --port 8765"
+                                   f"-e 'LORE_DATA_DIR={data_dir}' -- {expected_exe} mcp")
+    assert body["http_command"] == (
+        f"LORE_DATA_DIR='{data_dir}' {expected_exe} mcp --http --port 8765")
     assert body["claude_code_http"].endswith("--transport http lore http://127.0.0.1:8765/mcp")
     assert body["library"]["data_dir"] == data_dir
 

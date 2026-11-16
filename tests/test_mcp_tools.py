@@ -939,7 +939,8 @@ async def test_vector_search_needs_no_gemini_key(search_config, monkeypatch):
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr(agent_module, "OllamaProvider", FakeOllama)
+    monkeypatch.setattr(agent_module, "make_embedder",
+                        lambda config, timeout=None: FakeOllama())
 
     result = await vector_search(config, "a murder", embed=None)
 
@@ -1018,7 +1019,8 @@ async def test_vector_search_closes_the_embedder_when_ollama_errors(
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr(agent_module, "OllamaProvider", DownOllama)
+    monkeypatch.setattr(agent_module, "make_embedder",
+                        lambda config, timeout=None: DownOllama())
     result = await vector_search(search_config, "q", embed=None)
     assert result["error"]["code"] == "upstream_unavailable"
     assert "Ollama" in result["error"]["message"]

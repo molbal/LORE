@@ -135,15 +135,21 @@ def doctor() -> None:
         finally:
             await provider.aclose()
 
-    try:
-        healthy = asyncio.run(_check_ollama())
-        ok &= _report("ollama", healthy,
-                      config.ollama.model if healthy else f"no server at {config.ollama.host}")
-    except Exception as exc:
-        healthy = False
-        ok &= _report("ollama", False, str(exc))
+    from lore.inference.embedding import OPENROUTER, openrouter_key
+    local_embeddings = config.embedding.provider != OPENROUTER
+    if local_embeddings:
+        try:
+            healthy = asyncio.run(_check_ollama())
+            ok &= _report("ollama", healthy,
+                          config.ollama.model if healthy
+                          else f"no server at {config.ollama.host}")
+        except Exception as exc:
+            healthy = False
+            ok &= _report("ollama", False, str(exc))
+    else:
+        ok &= _report("ollama", True, "not needed: embeddings run on OpenRouter")
 
-    if healthy:
+    if local_embeddings and healthy or not local_embeddings:
         ok &= _report(*_embedding_check(config))
     ok &= _report(*_model_check(config))
 
@@ -151,9 +157,29 @@ def doctor() -> None:
 
 
 def _embedding_check(config) -> tuple[str, bool, str]:
-    """Whether Ollama has the embedding model every book and question needs."""
+    """Whether the configured embedder has its model (and its key)."""
     import httpx
-    name = config.extraction.embed_model_ollama
+
+    from lore.inference.embedding import OPENROUTER, openrouter_key
+    if config.embedding.provider == OPENROUTER:
+        model = config.embedding.model or config.extraction.embed_model_ollama
+        try:
+            key = openrouter_key()
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            return "embeddings", False, str(exc)
+        if key is None:
+            return ("embeddings", False,
+                    "no OpenRouter key: set OPENROUTER_API_KEY, or put one line"
+                    " `OPENROUTER_API_KEY=...` in ~/.config/lore/openrouter.env"
+                    " with mode 600")
+        if "embedding" not in model.lower():
+            return ("embeddings", True,
+                    f"{model} (a warning, not a test: run `lore doctor` with"
+                    " --probe, or ask a question, to check the key)")
+        return "embeddings", True, f"{model} on OpenRouter"
+    from lore.inference.embedding import embed_model_for
+
+    name = embed_model_for(config)
     try:
         tags = httpx.get(f"{config.ollama.host.rstrip('/')}/api/tags", timeout=10).json()
         pulled = {m.get("name", "") for m in tags.get("models", [])}
@@ -170,6 +196,13 @@ def _model_check(config) -> tuple[str, bool, str]:
     from lore.orchestrator.stages import no_model_note
     if config.llm.provider == providers.OPENAI_COMPATIBLE:
         return "model", True, f"local model {config.llm.model or '?'} at {config.llm.base_url}"
+    if config.llm.provider == providers.OPENROUTER:
+        model = config.llm.model or ", ".join(config.llm.models) or "?"
+        try:
+            providers.credentials(config)
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            return "model", False, str(exc)
+        return "model", True, f"OpenRouter {model}"
     if no_model_note(config, "doctor") is None:
         return "model", True, config.llm.provider
     if config.extraction_provider == "ollama":

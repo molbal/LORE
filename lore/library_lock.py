@@ -9,16 +9,18 @@ while it runs. Every acquire is non-blocking: whoever finds it taken is
 refused (LibraryBusy) and says so, rather than waiting minutes behind an
 upload or hours behind a run.
 
-The file is `<library>/.books.lock`, an flock (released by the kernel when
-its holder exits, so a crash never leaves the library locked). It is never
-copied into a sample template (lore.sample ignores it).
+The file is `<library>/.books.lock`, an advisory file lock (fcntl on POSIX,
+msvcrt on Windows: lore.filelock; released by the system when its holder
+exits, so a crash never leaves the library locked). It is never copied into
+a sample template (lore.sample ignores it).
 """
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import os
 from pathlib import Path
+
+from lore import filelock
 
 LOCK_NAME = ".books.lock"
 
@@ -34,7 +36,7 @@ def hold(library: Path, *, exclusive: bool):
     fd = os.open(library / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:
-            fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+            filelock.lock(fd, exclusive=exclusive, blocking=False)
         except BlockingIOError:
             raise LibraryBusy("the library is busy") from None
         yield

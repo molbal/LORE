@@ -18,6 +18,29 @@ class OllamaConfig(BaseModel):
     model: str = "qwen2.5:3b-instruct-q4_K_M"
 
 
+class EmbeddingConfig(BaseModel):
+    """Who turns text into vectors (`lore.inference.embedding`).
+
+    "ollama" (the code default): nomic-embed-text on the local Ollama, in 768
+    dimensions, exactly as before. "openrouter": OpenRouter's /embeddings on
+    the server's OpenRouter key, with `model` (an OpenRouter embedding model
+    id) and `dimensions` sent so the vectors keep the width the stores are
+    declared with (`lore.db.lance_store.EMBED_DIM`). `base_url` is for a
+    proxy; empty means OpenRouter's own.
+
+    Every book embeds its chunks once, at extraction, and the question side
+    must use the same model afterwards: changing `provider` or `model` on a
+    library that already has books means re-processing them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["ollama", "openrouter"] = "ollama"
+    model: str = ""
+    base_url: str = ""
+    dimensions: int = Field(default=768, ge=1)
+
+
 # The extraction tier that ran on Kaggle's free GPUs was removed. An old
 # lore.toml still loads (its `[lore.kaggle]` section and the kernel's
 # `[lore.extraction]` keys are ignored, as any unknown key is); a run with
@@ -174,12 +197,23 @@ class LlmConfig(BaseModel):
     mode: a server-side URL chosen by users would reach the server's network.
     `max_output_tokens` (default 8192, 0 for none) caps each reply.
 
+    "openrouter" (local mode only): the OpenRouter gateway
+    (https://openrouter.ai) on the server's own key: OPENROUTER_API_KEY or
+    ~/.config/lore/openrouter.env (mode 600), never lore.toml. `model` is a
+    comma-free OpenRouter model id ("minimax/minimax-m3.1-flash"); `models`
+    is an ordered cascade, tried in turn when one is rate limited or
+    overloaded. `fast_model` runs the short structured steps. Refused in
+    multi mode for the same reason as a self-hosted server: the server's key
+    pays, and users could point it anywhere. Embeddings are chosen separately
+    (`[lore.embedding]`).
+
     In multi mode each user's own choice (Account settings) applies instead.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["gemini", "anthropic", "openai", "openai_compatible"] = "gemini"
+    provider: Literal["gemini", "anthropic", "openai", "openai_compatible",
+                      "openrouter"] = "gemini"
     model: str = ""
     fast_model: str = ""
     gemini_paid: bool = False
@@ -187,6 +221,9 @@ class LlmConfig(BaseModel):
         default_factory=dict)
     base_url: str = ""
     concurrency: int = Field(default=1, ge=1)
+    # openrouter: the ordered cascade of model ids ("minimax/...", "google/...";
+    # tried in turn on a 429/503/404). Empty means `model` alone.
+    models: list[str] = Field(default_factory=list)
     # openai_compatible: the reply cap sent as max_tokens (0: none sent, the
     # server decides). A cap matters: a small model can repeat itself until
     # its context is full. vLLM refuses a cap that overflows the context.
@@ -202,6 +239,20 @@ class LlmConfig(BaseModel):
         if not self.model:
             raise ValueError('[lore.llm] provider = "openai_compatible" needs model'
                              " (the name the server knows it by)")
+        return self
+
+    @model_validator(mode="after")
+    def _openrouter_needs_a_model(self) -> "LlmConfig":
+        if self.provider != "openrouter":
+            return self
+        if not self.model and not self.models:
+            raise ValueError('[lore.llm] provider = "openrouter" needs model'
+                             ' (a model id from openrouter.ai/models, e.g.'
+                             ' "minimax/minimax-m3.1-flash"), or models = [...]'
+                             " for a cascade")
+        if self.base_url and not self.base_url.startswith(("http://", "https://")):
+            raise ValueError('[lore.llm] provider = "openrouter" base_url starts'
+                             " with http:// or https://")
         return self
 
 
@@ -264,6 +315,8 @@ class LoreConfig(BaseModel):
     extraction_provider: Literal["ollama", "gemini", "kaggle"] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
+    # Who embeds text (`lore.inference.embedding`): local Ollama by default.
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     disambiguation: DisambiguationConfig = Field(
         default_factory=DisambiguationConfig
     )

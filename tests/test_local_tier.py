@@ -129,15 +129,16 @@ async def test_gemini_unit_sends_one_chunk_per_request_and_embeds_locally(
     assert client.requests_made == 3
     for chunk, prompt in zip(unit.chunks, prompts):
         assert prompt.startswith(build_prompt(chunk.text))
-    # Embeddings stay local: nomic on Ollama with the document prefix, the
-    # same embedder the query side uses.
+    # The embedder asks for the configured model (Ollama's nomic-embed-text by
+    # default; this checkout's lore.toml sets the OpenRouter embedding model).
+    from lore.inference.embedding import embed_model_for
+
     assert embedder.calls == [
-        ([DOCUMENT_PREFIX + c.text for c in unit.chunks],
-         config.extraction.embed_model_ollama)
+        ([DOCUMENT_PREFIX + c.text for c in unit.chunks], embed_model_for(config))
     ]
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["model"] == "gemini-3.1-flash-lite"
-    assert manifest["embed_model"] == config.extraction.embed_model_ollama
+    assert manifest["embed_model"] == embed_model_for(config)
     rows = pq.read_table(tmp_path / "triplets.parquet").to_pylist()
     assert {row["extractor_model"] for row in rows} == {"gemini-3.1-flash-lite"}
 

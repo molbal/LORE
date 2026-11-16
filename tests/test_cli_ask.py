@@ -225,6 +225,8 @@ def test_gemini_without_a_key_exits_and_does_not_fall_back(env: Path) -> None:
 
 
 def test_gemini_refuses_a_key_file_others_can_read(env: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX file modes do not exist on Windows (lore.inference.keyfile)")
     _library(env, graphed=True)
     _gemini_toml(env)
     key_file = env / "home" / ".config" / "lore" / "gemini.env"

@@ -29,13 +29,19 @@ from lore.inference.gemini import (
 GEMINI = "gemini"
 ANTHROPIC = "anthropic"
 OPENAI = "openai"
+# OpenRouter: one key and one endpoint in front of many models, local mode
+# only (lore.inference.providers.openrouter_model). Never offered to a
+# multi-mode user: the server's key pays, and the price is the server's.
+OPENROUTER = "openrouter"
 # What a user may choose (multi mode's Account settings, the central keys).
 PROVIDERS = (GEMINI, ANTHROPIC, OPENAI)
 # Local mode only, never in PROVIDERS: a self-hosted server that speaks
-# OpenAI's chat completions (providers/openai_compatible.py).
+# OpenAI's chat completions (providers/openai_compatible.py), and the
+# OpenRouter gateway with the server's own key.
 OPENAI_COMPATIBLE = "openai_compatible"
+LOCAL_PROVIDERS = (GEMINI, ANTHROPIC, OPENAI, OPENAI_COMPATIBLE, OPENROUTER)
 LABELS = {GEMINI: "Gemini", ANTHROPIC: "Claude", OPENAI: "OpenAI",
-          OPENAI_COMPATIBLE: "Local model"}
+          OPENAI_COMPATIBLE: "Local model", OPENROUTER: "OpenRouter"}
 
 Model = TypeVar("Model", bound=BaseModel)
 

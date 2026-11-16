@@ -226,6 +226,8 @@ async def test_gemini_verdicts_parse_like_the_local_ones(tmp_path, reply, expect
 
 @pytest.mark.asyncio
 async def test_embeddings_stay_local_with_the_document_prefix(tmp_path) -> None:
+    from lore.inference.embedding import embed_model_for
+
     embedder = _Embedder()
     _c, _cache, embed, _a, aclose = _pair(tmp_path, _answering("no"), embedder)
     try:
@@ -233,8 +235,10 @@ async def test_embeddings_stay_local_with_the_document_prefix(tmp_path) -> None:
     finally:
         await aclose()
     config = LoreConfig.load()
+    # The model the configured embedder is told to use (Ollama's
+    # nomic-embed-text by default; this checkout's lore.toml may set another).
     assert embedder.calls == [([DOCUMENT_PREFIX + "Holmes — he examined the body"],
-                               config.extraction.embed_model_ollama)]
+                               embed_model_for(config))]
     assert embedder.closed
 
 

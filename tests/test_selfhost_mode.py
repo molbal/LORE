@@ -24,7 +24,8 @@ NAMES = ("LORE_SESSION_SECRET", "LORE_CSRF_SECRET", "LORE_KEY_ENCRYPTION_KEY")
 def test_secrets_are_made_once_and_kept_in_the_data_root(tmp_path):
     first = ensure_secrets(tmp_path, environ={})
     path = tmp_path / SECRETS_FILE
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":  # Windows has POSIX modes; the profile's ACL applies
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert ensure_secrets(tmp_path, environ={}) == first
     assert len(set(first.values())) == 3
     # Usable as they are: AuthSettings and MasterKeys accept them.

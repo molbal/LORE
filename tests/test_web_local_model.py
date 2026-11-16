@@ -3,6 +3,7 @@
 lore.toml for every model step, the key file, and none of it in multi mode.
 The server under test is a faked HTTP transport (no network)."""
 import json
+import os
 
 import httpx
 import pytest
@@ -69,14 +70,16 @@ def test_save_overrides_lore_toml_for_every_step_and_delete_restores_it(tmp_path
     assert out["saved"] == {"provider": "openai_compatible", "model": "qwen-28b",
                             "fast_model": None, "base_url": BASE, "has_key": True}
     assert KEY not in r.text
-    # the files: the choice in the data dir, the key next to the other keys; both 600
+    # the files: the choice in the data dir, the key next to the other keys.
+    # Both are owner-only where POSIX modes exist; Windows has no such bits.
     path = saved_llm_path(config.data_dir)
     assert json.loads(path.read_text()) == {"base_url": BASE, "model": "qwen-28b",
                                             "fast_model": ""}
-    assert path.stat().st_mode & 0o777 == 0o600
     key_file = home / ".config" / "lore" / "llm.env"
     assert key_file.read_text() == f"LORE_LLM_API_KEY={KEY}\n"
-    assert key_file.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert key_file.stat().st_mode & 0o777 == 0o600
     # every model step now runs on it, exactly as the lore.toml setup would
     effective = with_saved_llm(config)
     assert (effective.llm.provider, effective.llm.base_url, effective.llm.model) == (

@@ -312,20 +312,22 @@ def seconds_to_reset(now: datetime) -> float:
 
 def default_key_file() -> Path:
     """`~/.config/lore/gemini.env`: outside the repo, so never committed."""
-    return Path.home() / ".config" / "lore" / "gemini.env"
+    from lore.inference import keyfile
+    return keyfile.key_file("gemini")
 
 
 def _key_from_file(path: Path) -> str | None:
     if key_scope.server_key_forbidden():  # belt and braces: see resolve_api_key
         raise key_scope.KeyRequired()
     try:
-        info = path.stat()
+        path.stat()
     except FileNotFoundError:
         return None
-    mode = stat.S_IMODE(info.st_mode)
-    if mode & ~0o600:
+    from lore.inference import keyfile
+    if not keyfile.mode_is_private(path):
         # Refuse rather than read: a key other accounts can read is a key
         # that may already be theirs, and reading it anyway teaches nobody.
+        mode = stat.S_IMODE(path.stat().st_mode)
         raise GeminiKeyFileError(
             f"refusing to read {path}: its mode is {oct(mode)[2:]}, which lets"
             f" someone other than its owner read it. Run `chmod 600 {path}`."

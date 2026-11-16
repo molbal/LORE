@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ from lore.extract.runner import (
     extract_chunks,
 )
 from lore.extract.schemas import SCHEMA_VERSION, ChunkExtraction
+from lore.inference.embedding import embed_model_for, make_embedder
 from lore.inference.gemini import (
     GeminiClient,
     GeminiError,
@@ -71,6 +73,14 @@ def parts_dir(dest: Path) -> Path:
     return dest / PARTS_DIR
 
 
+def part_name(chunk_id: str) -> str:
+    """A chunk id as a FILE NAME. Chunk ids are `<book>:<chapter>:<seq>`, and
+    a colon is legal in a POSIX file name but not in a Windows one, so any
+    character a file system refuses becomes `_` (all Windows-refused ones are
+    excluded from chunk ids, so this collides with nothing)."""
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", chunk_id)
+
+
 def parts_done(dest: Path, unit: WorkUnit) -> int:
     """How many of the unit's chunks already have a saved, readable part."""
     folder = parts_dir(dest)
@@ -89,7 +99,7 @@ def _write_part(folder: Path, chunk_id: str, result: ExtractionResult,
         body = {"extraction": None,
                 "dead": {"raw_output": dead.raw_output, "error": dead.error}}
     body["models"] = sorted(models)
-    fs.atomic_write_json(folder / f"{chunk_id}.json", body)
+    fs.atomic_write_json(folder / f"{part_name(chunk_id)}.json", body)
 
 
 def _load_part(folder: Path, chunk_id: str) -> tuple[ExtractionResult, set[str]] | None:
@@ -99,7 +109,7 @@ def _load_part(folder: Path, chunk_id: str) -> tuple[ExtractionResult, set[str]]
     could leave before writes were fsynced) is treated as missing: logged
     once, removed, and its chunk requested again. Never a crash.
     """
-    path = folder / f"{chunk_id}.json"
+    path = folder / f"{part_name(chunk_id)}.json"
     if not path.is_file():
         return None
     try:
@@ -115,7 +125,7 @@ def _load_part(folder: Path, chunk_id: str) -> tuple[ExtractionResult, set[str]]
 
 
 def _read_part(folder: Path, chunk_id: str) -> tuple[ExtractionResult, set[str]]:
-    body = json.loads((folder / f"{chunk_id}.json").read_text())
+    body = json.loads((folder / f"{part_name(chunk_id)}.json").read_text())
     if not isinstance(body, dict):
         raise ValueError("a part is a JSON object")
     result = ExtractionResult()
@@ -126,6 +136,14 @@ def _read_part(folder: Path, chunk_id: str) -> tuple[ExtractionResult, set[str]]
         result.dead_letters.append(DeadLetter(
             chunk_id, body["dead"]["raw_output"], body["dead"]["error"]))
     return result, set(body["models"])
+
+
+def _embedder_where(config: LoreConfig) -> str:
+    """Where the configured embedder is, for an error message."""
+    embedding = getattr(config, "embedding", None)
+    if getattr(embedding, "provider", "ollama") == "openrouter":
+        return embedding.base_url or "https://openrouter.ai/api/v1"
+    return config.ollama.host
 
 
 def _finish_unit(
@@ -147,7 +165,7 @@ def _finish_unit(
         result=result,
         vectors=vectors,
         model=model,
-        embed_model=config.extraction.embed_model_ollama,
+        embed_model=embed_model_for(config),
         gpu_seconds=time.monotonic() - started,
         schema_version=SCHEMA_VERSION,
         started_at=started_at,
@@ -161,13 +179,13 @@ async def run_unit_local(
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     owned = provider is None
-    active = provider if provider is not None else OllamaProvider(config.ollama)
+    active = provider if provider is not None else make_embedder(config)
     try:
         inputs = [ChunkInput(chunk.id, chunk.text) for chunk in unit.chunks]
         result = await extract_chunks(inputs, active)
         vectors = await active.embed(
             [DOCUMENT_PREFIX + chunk.text for chunk in unit.chunks],
-            model=config.extraction.embed_model_ollama,
+            model=embed_model_for(config),
         )
     finally:
         if owned:
@@ -239,17 +257,17 @@ class GeminiExtractionProvider:
 
 
 async def embed_unit(config: LoreConfig, unit: WorkUnit, embedder) -> list[list[float]]:
-    """The unit's chunk vectors in ONE local embed request, or ExtractionHalted."""
+    """The unit's chunk vectors in ONE embed request, or ExtractionHalted."""
     try:
         return await embedder.embed(
             [DOCUMENT_PREFIX + chunk.text for chunk in unit.chunks],
-            model=config.extraction.embed_model_ollama,
+            model=embed_model_for(config),
         )
     except Exception as exc:
         raise ExtractionHalted(
-            f"the local embedder ({config.extraction.embed_model_ollama} on"
-            f" {config.ollama.host}) failed, so no Gemini request was spent on"
-            f" this unit: {exc}"
+            f"the embedder ({embed_model_for(config)} on"
+            f" {_embedder_where(config)}) failed, so no model request was spent"
+            f" on this unit: {exc}"
         ) from exc
 
 
@@ -432,5 +450,5 @@ def make_gemini_tier(config: LoreConfig, api_key: str | None = None) -> GeminiTi
                                patient=True,
                                daily_count=(counter_for(config.sqlite_path)
                                             if gemini else None)),
-        embedder=OllamaProvider(config.ollama),
+        embedder=make_embedder(config),
     )

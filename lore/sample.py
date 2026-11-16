@@ -23,7 +23,6 @@ switches seeding and the button off.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import logging
 import os
@@ -214,13 +213,15 @@ class LibraryNotEmpty(SampleError):
 @contextlib.contextmanager
 def _library_lock(library: Path):
     """One sample copy at a time per library, across processes."""
+    from lore import filelock
+
     lock = library.parent / f".{library.name}.sample.lock"
     with open(lock, "a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+        filelock.lock(handle.fileno(), exclusive=True)
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            filelock.unlock(handle.fileno())
 
 
 def library_busy(conn: sqlite3.Connection, library: Path) -> str | None:
@@ -632,6 +633,13 @@ def _prune_caches(config: LoreConfig, conn: sqlite3.Connection, keep: str) -> No
 IMPORT_MIN_THREADS = 2
 
 
+def _cypher_path(path: Path) -> str:
+    """A path as a Cypher string literal. Kuzu parses `'\\'` as an escape, so
+    every backslash is doubled: a Windows path would otherwise end the
+    literal early (or read `\\n` as a newline)."""
+    return "'" + str(path).replace("\\", "\\\\").replace("'", "''") + "'"
+
+
 def import_graph(export: Path, target: Path) -> None:
     """A new Kuzu database at `target` from an EXPORT DATABASE folder."""
     import kuzu as _kuzu
@@ -639,7 +647,7 @@ def import_graph(export: Path, target: Path) -> None:
     db = _kuzu.Database(str(target), max_num_threads=threads)
     try:
         c = _kuzu.Connection(db)
-        c.execute(f"IMPORT DATABASE '{export}'")
+        c.execute(f"IMPORT DATABASE {_cypher_path(export)}")
         c.close()
     finally:
         db.close()
@@ -659,7 +667,7 @@ def _compact(config: LoreConfig, conn: sqlite3.Connection) -> None:
         try:
             store = KuzuStore(graph)
             try:
-                store.execute(f"EXPORT DATABASE '{export}' (format='parquet')")
+                store.execute(f"EXPORT DATABASE {_cypher_path(export)} (format='parquet')")
             finally:
                 store.close()
             import_graph(export, rebuilt)

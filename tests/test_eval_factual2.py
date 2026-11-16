@@ -10,9 +10,12 @@ from pathlib import Path
 import pytest
 
 EVALS = Path(__file__).parents[1] / "evals" / "answer_quality"
-NEW = json.loads((EVALS / "factual2.json").read_text())
+# encoding="utf-8": Windows' default is the locale code page (cp1252), which
+# cannot decode the curly quotes and dashes these files contain.
+NEW = json.loads((EVALS / "factual2.json").read_text(encoding="utf-8"))
 OLD_SETS = ("questions", "heldout", "arc", "interpretive", "deep", "recap")
-OLD = [(name, q) for name in OLD_SETS for q in json.loads((EVALS / f"{name}.json").read_text())]
+OLD = [(name, q) for name in OLD_SETS
+       for q in json.loads((EVALS / f"{name}.json").read_text(encoding="utf-8"))]
 SIS, SOF = "05ab674df048d13f", "0ee225a9a3b5fbc2"
 
 

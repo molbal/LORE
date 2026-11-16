@@ -21,8 +21,14 @@ ENV_URL = "LORE_DATABASE_URL"
 
 
 def default_url(config: LoreConfig) -> str:
-    """The SQLite file beside the data root (`<data_dir>/central.db`)."""
-    return f"sqlite:///{Path(config.data_dir).resolve() / 'central.db'}"
+    """The SQLite file beside the data root (`<data_dir>/central.db`).
+
+    SQLAlchemy reads the path after `sqlite:///` as a URL path, so the
+    separators are normalised to `/`: a Windows `\\` here reaches the driver
+    as an escaped character rather than a directory break.
+    """
+    path = Path(config.data_dir).resolve() / "central.db"
+    return f"sqlite:///{path.as_posix()}"
 
 
 def database_url(config: LoreConfig) -> str:

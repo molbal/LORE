@@ -404,7 +404,7 @@ def test_the_graph_import_never_runs_on_a_single_thread(tmp_path, monkeypatch):
     c.execute("CREATE NODE TABLE E(id STRING, PRIMARY KEY(id))")
     c.execute("CREATE REL TABLE R(FROM E TO E)")
     c.execute("CREATE (:E {id:'a'})-[:R]->(:E {id:'b'})")
-    c.execute(f"EXPORT DATABASE '{tmp_path / 'exp'}' (format='parquet')")
+    c.execute(f"EXPORT DATABASE {sample._cypher_path(tmp_path / 'exp')} (format='parquet')")
     c.close()
     src.close()
 

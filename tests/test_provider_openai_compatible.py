@@ -5,6 +5,7 @@ error mapping, usage, the concurrency gate, the factory wiring and the
 multi-mode refusal. No network."""
 import asyncio
 import json
+import os
 
 import httpx
 import pytest
@@ -297,8 +298,9 @@ def test_the_key_is_optional_and_comes_from_the_env_or_llm_env(clean_env, monkey
     path.parent.mkdir(parents=True)
     path.write_text(f"LORE_LLM_API_KEY={KEY}\n")
     path.chmod(0o644)
-    with pytest.raises(Exception, match="chmod 600"):
-        factory.credentials(cfg)
+    if os.name != "nt":  # no POSIX modes on Windows (lore.inference.keyfile)
+        with pytest.raises(Exception, match="chmod 600"):
+            factory.credentials(cfg)
     path.chmod(0o600)
     assert factory.credentials(cfg).key == KEY
     assert KEY not in repr(factory.credentials(cfg))

@@ -589,7 +589,9 @@ def test_make_query_models_builds_its_ollama_with_that_timeout(monkeypatch) -> N
         async def aclose(self):
             return None
 
-    monkeypatch.setattr(agent, "OllamaProvider", Recording)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(agent, "make_embedder",
+                        lambda config, timeout=None: Recording(config, timeout=timeout))
     make_query_models(CONFIG)
     assert seen["timeout"] == agent.OLLAMA_TIMEOUT_S
 

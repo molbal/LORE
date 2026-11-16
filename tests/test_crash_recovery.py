@@ -134,7 +134,7 @@ def test_damaged_parts_are_requested_again_and_nothing_else(tmp_path, how) -> No
     config, conn = _processed(tmp_path)
     dest = _dest(config, UNITS[1])
     _damage(dest / "embeddings.parquet", "empty")
-    _damage(parts_dir(dest) / f"{BOOK}:1:3.json", how)
+    _damage(parts_dir(dest) / f"{BOOK}_1_3.json", how)
 
     again = Server()
     job = run_book(conn, config, BOOK, [ExtractStage(gemini_tier_factory=again.factory())])
@@ -165,7 +165,7 @@ def test_a_damaged_part_mid_unit_never_crashes_the_resume(tmp_path, how) -> None
     job = run_book(conn, config, BOOK, [ExtractStage(gemini_tier_factory=first.factory())])
     assert job.state == "waiting_quota"
     dest = _dest(config, UNITS[1])
-    _damage(parts_dir(dest) / f"{BOOK}:1:2.json", how)
+    _damage(parts_dir(dest) / f"{BOOK}_1_2.json", how)
     assert parts_done(dest, UNITS[1]) == 0
 
     again = Server()
@@ -218,7 +218,7 @@ def test_a_leftover_temp_is_cleaned_by_the_next_write(tmp_path, monkeypatch) -> 
     config, conn = _setup(tmp_path, N, "a")
     folder = parts_dir(_dest(config, UNITS[0]))
     folder.mkdir(parents=True)
-    stale = folder / f"{BOOK}:1:0.json.999999999.0badcafe.tmp"
+    stale = folder / f"{BOOK}_1_0.json.999999999.0badcafe.tmp"
     stale.write_text('{"extraction": nu')
     fs._cleaned.clear()
     job = run_book(conn, config, BOOK, [ExtractStage(gemini_tier_factory=Server().factory())])

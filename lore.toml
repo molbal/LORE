@@ -1,56 +1,74 @@
 # LORE configuration — see lore/config.py for all keys and defaults.
+#
+# This checkout is set up for ONE reader on ONE computer, with every model on
+# OpenRouter (https://openrouter.ai): text through minimax/minimax-m3.1-flash,
+# embeddings through qwen/qwen3-embedding-8b at 768 dimensions. No Ollama, no
+# Gemini, no llama.cpp, no Claude/OpenAI account.
+#
+# The key is never here: put one line
+#   OPENROUTER_API_KEY=sk-or-...
+# in ~/.config/lore/openrouter.env (mode 600), or set the environment
+# variable. One key serves both the text models and the embeddings.
 [lore]
 data_dir = "data"
-# "ollama" (fully local, zero-egress, code default) | "gemini" (one request
-# per chunk to the remote model [lore.llm] picks, Gemini unless set;
-# embeddings stay local on Ollama).
-# This project builds its graph with Gemini, for quality (Task R1): on 22
-# chunks judged against the text, Gemini 3.1 Flash Lite's relationships were
-# 81% supported vs a local 7B's 61%, with 1 wrong entity kind vs 56. The key
-# comes from GEMINI_API_KEY or ~/.config/lore/gemini.env (mode 600), never here.
+# "gemini" is LORE's name for "the remote model [lore.llm] picks": running a
+# chunk through it means through OpenRouter here (not Google's API).
+# Embeddings are chosen separately, in [lore.embedding] below.
 extraction_provider = "gemini"
 
+[lore.llm]
+provider = "openrouter"
+# The model every step runs on: extraction, the graph build, disambiguation,
+# story beats, character profiles, and answers.
+model = "minimax/minimax-m3.1-flash"
+# Tried in order when one is rate limited (429), overloaded (503) or not
+# available to the key (404). Swap or extend freely: any OpenRouter model id
+# works (openrouter.ai/models).
+models = ["minimax/minimax-m3.1-flash", "google/gemini-3.1-flash-lite"]
+# Short structured steps (search selection, question splitting, the claim
+# check) may run on the cheaper model: the same family here, so left unset.
+# fast_model = "google/gemini-3.1-flash-lite"
+# Requests in flight at once while processing a book. One at a time would make
+# a novel take hours; a paid OpenRouter key is not metered per minute by LORE.
+concurrency = 4
+# Cap per reply (0 sends none and lets the model decide).
+max_output_tokens = 8192
+
+[lore.embedding]
+provider = "openrouter"
+model = "qwen/qwen3-embedding-8b"
+# The stores are declared 768 wide (lore/db/lance_store.py); OpenRouter is
+# asked to shorten the model's vectors to that width. Change both together,
+# and re-process every book: a library's vectors must all come from ONE model.
+dimensions = 768
+
 [lore.ollama]
+# Unused with the settings above (kept so a switch back needs no edit).
 host = "http://localhost:11434"
 model = "qwen2.5:3b-instruct-q4_K_M"
 
 [lore.extraction]
-embed_model_ollama = "nomic-embed-text"
-# 10: a unit stopped by the daily quota re-embeds on --resume, and each chunk's
-# extraction is saved as it returns, so a resume asks only the missing chunks.
 work_unit_size = 10
-# gemini_models = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"]   # the default
 
-# `lore ask`'s two LLM steps. Code defaults are "ollama" for both, so a
-# checkout with no key still works; this project uses Gemini for both, for
-# quality (Phase 3 Tasks 7c and 8b). "gemini" sends the question, its seed
-# entity names and its evidence passages to Google. The key comes from
-# GEMINI_API_KEY or ~/.config/lore/gemini.env (mode 600), never from here.
+# The two `lore ask` LLM steps. "gemini" means "the remote model [lore.llm]
+# picks", which is OpenRouter here.
 [lore.selection]
 provider = "gemini"
 
 [lore.synthesis]
 provider = "gemini"
 
-# The resolver's borderline merge questions during `lore process`. Code
-# default "ollama"; the local 3B answered against the truth on this graph
-# (lore/graph/loader.py). "gemini" sends the same prompt (two names, kinds,
-# aliases, one evidence sentence) and caches every answer in
-# data/adjudication/answers.json, so a reload spends zero requests.
+# The resolver's borderline merge questions during `lore process`.
 [lore.adjudication]
 provider = "gemini"
 
 # Record ambiguous bare surnames during `lore process`; `lore disambiguate`
-# answers them in one Gemini request (12/12 on the eval), and the next
-# `lore process --skip-extract` applies the answers.
+# answers them in one request per batch.
 [lore.disambiguation]
 enabled = true
 
-# Processing stops while this many of the day's Gemini requests remain, so
-# questions in the UI keep working during a long book (about 8 questions).
 [lore.processing]
+# OpenRouter has no free-tier daily request cap, so the Gemini answer reserve
+# does not apply; it is harmless left at its default.
 answer_reserve = 60
-# Model requests in flight at once while processing (extraction chunks, codex,
-# beats, disambiguation): Claude, OpenAI and a paid Gemini plan. Free-tier
-# Gemini uses gemini_free_concurrency (default 1, one at a time).
-# llm_concurrency = 4
+llm_concurrency = 4

@@ -45,6 +45,25 @@ def is_temp(path: Path) -> bool:
 def _pid_alive(pid: int) -> bool:
     if pid == os.getpid():
         return True
+    if os.name == "nt":
+        # os.kill(pid, 0) is not a probe on Windows: Python maps any signal
+        # number to TerminateProcess. Query the handle instead.
+        import ctypes
+        from ctypes import wintypes
+
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not ctypes.windll.kernel32.GetExitCodeProcess(
+                    handle, ctypes.byref(code)):
+                return True  # cannot tell: keep the temp
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -91,7 +110,14 @@ def _sweep_once(directory: Path) -> None:
 
 
 def fsync_dir(directory: Path) -> None:
-    """Make a rename in `directory` durable. A no-op where unsupported."""
+    """Make a rename in `directory` durable. A no-op where unsupported.
+
+    Windows cannot open a directory as a file, so there is no directory
+    entry to flush there; the file's own fsync before the rename is all the
+    platform offers (NTFS journals the rename itself).
+    """
+    if os.name == "nt":
+        return
     try:
         fd = os.open(directory, os.O_RDONLY)
     except OSError:
@@ -109,7 +135,18 @@ def _temp_for(path: Path) -> Path:
 
 
 def _commit(temporary: Path, path: Path) -> None:
-    os.replace(temporary, path)
+    # Windows refuses to replace a file another handle has open (a reader of
+    # the old file, which POSIX happily leaves alone), so retry briefly
+    # instead of failing a write that is perfectly safe.
+    attempts = 40 if os.name == "nt" else 1
+    for attempt in range(attempts):
+        try:
+            os.replace(temporary, path)
+            break
+        except PermissionError:
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(0.05)
     fsync_dir(path.parent)
 
 
@@ -148,17 +185,24 @@ def atomic_write_json(path: Path, obj: object, **dumps_kwargs) -> None:
     atomic_write_text(path, json.dumps(obj, **dumps_kwargs))
 
 
+def _fsync_file(path: Path) -> None:
+    """Flush a written file to disk. Windows' CRT `fsync` (what os.fsync
+    calls) rejects a read-only descriptor with EBADF, so open it writable
+    there; POSIX flushes a read-only descriptor as before."""
+    fd = os.open(path, os.O_RDWR if os.name == "nt" else os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def atomic_write_parquet(path: Path, table) -> None:
     """`pq.write_table` to a temp, fsync it, then rename into place."""
     import pyarrow.parquet as pq
 
     def fill(temporary: Path) -> None:
         pq.write_table(table, str(temporary))
-        fd = os.open(temporary, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        _fsync_file(temporary)
 
     _write_via(path, fill)
 

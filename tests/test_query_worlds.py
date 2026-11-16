@@ -182,7 +182,7 @@ async def test_a_one_world_claims_prompt_matches_the_one_before_worlds(tmp_path,
     `answer_question` over this fixture, one_world=True, with the scripted
     models; regenerate it only by doing the same."""
     before_prose_precision(monkeypatch)  # pinned before prose-precision
-    golden = GOLDEN_PROMPT.read_text()
+    golden = GOLDEN_PROMPT.read_text(encoding="utf-8")
     one = build_library(tmp_path / "one", one_world=True)
     for world in ("unset", ALPHA, "all"):
         _answer, calls = await ask(one, world)

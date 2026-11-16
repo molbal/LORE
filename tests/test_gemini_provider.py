@@ -4,6 +4,7 @@ No test here may reach the network. The Lite tier allows 500 requests a
 day and the Flash tier 20, and the controller owns both budgets.
 """
 import json
+import os
 
 import httpx
 import pytest
@@ -418,6 +419,8 @@ def test_a_missing_or_keyless_file_is_no_key(tmp_path) -> None:
 
 @pytest.mark.parametrize("mode", [0o640, 0o604, 0o644, 0o660, 0o666])
 def test_a_key_file_others_can_read_is_refused_and_says_why(tmp_path, mode: int) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX file modes do not exist on Windows (lore.inference.keyfile)")
     path = _key_file(tmp_path, f"GEMINI_API_KEY={SECRET}\n", mode)
     with pytest.raises(GeminiKeyFileError) as exc:
         resolve_api_key({}, key_file=path)

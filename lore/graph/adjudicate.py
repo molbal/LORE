@@ -20,6 +20,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from lore.config import LoreConfig
 from lore.extract.embed import DOCUMENT_PREFIX
+from lore.inference.embedding import embed_model_for, make_embedder
 from lore.inference.gemini import (
     GeminiClient,
     GeminiOutputError,
@@ -76,10 +77,12 @@ def parse_verdict(answer: str) -> bool:
 
 
 def _embedder(config: LoreConfig, provider):
+    model = embed_model_for(config)
+
     async def embed(texts: list[str]) -> list[list[float]]:
         return await provider.embed(
             [DOCUMENT_PREFIX + text for text in texts],
-            model=config.extraction.embed_model_ollama,
+            model=model,
         )
 
     return embed
@@ -228,7 +231,7 @@ def make_gemini_pair(
     """
     if client is None:
         client = _adjudication_client(config, api_key)
-    local = embedder if embedder is not None else OllamaProvider(config.ollama)
+    local = embedder if embedder is not None else make_embedder(config)
     store = cache if cache is not None else AdjudicationCache(config.adjudication_dir)
     embed = _embedder(config, local)
 

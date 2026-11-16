@@ -374,7 +374,9 @@ def verify_entry(raw: CodexAnswer, entity: CodexEntity, world_id: int,
 
 def cache_path(codex_dir: Path, entity_id: str, evidence_hash_: str) -> Path:
     """One file per (entity, evidence): an entity whose evidence changes and
-    then changes back (a book moved out and in again) finds its answer."""
+    then changes back (a book moved out and in again) finds its answer.
+    `entity_id` is a slug (`book_mention_normhash`): only `_` and the hash,
+    so no character a Windows file name refuses is possible."""
     return codex_dir / f"{entity_id}-{evidence_hash_}.json"
 
 

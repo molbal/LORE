@@ -1122,7 +1122,8 @@ def test_the_prompt_leaks_nothing_from_the_eval_set() -> None:
         synthesize_module._STORY_SENTENCES_BLOCK, synthesize_module._GAPS_BLOCK,
         __import__('lore.beats.build', fromlist=['x']).BEATS_PROMPT,
         __import__('lore.codex.build', fromlist=['x']).CODEX_PROMPT)))
-    for q in (q for path in sets for q in json.loads(path.read_text())):
+    for q in (q for path in sets
+              for q in json.loads(path.read_text(encoding="utf-8"))):
         leaked = (grams(q["question"]) | grams(q["verified"])) & prompt
         assert not leaked, f"{q['id']} leaks into the prompt: {sorted(leaked)}"
 

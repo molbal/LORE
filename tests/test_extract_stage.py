@@ -175,6 +175,9 @@ def test_key_rejection_fails_the_job_instead_of_waiting_for_quota(tmp_path) -> N
 def test_the_processing_reserve_stops_before_any_request(tmp_path) -> None:
     config, conn = _setup(tmp_path, 2, "a")
     config = config.model_copy(update={
+        # Gemini's free-tier ledger is what the reserve protects (this
+        # checkout's lore.toml runs OpenRouter, which has no such ledger).
+        "llm": config.llm.model_copy(update={"provider": "gemini"}),
         "processing": config.processing.model_copy(update={"answer_reserve": 10**6})})
     server = Server()
     job = run_book(conn, config, BOOK, [ExtractStage(gemini_tier_factory=server.factory())])
@@ -189,6 +192,10 @@ def test_an_unreachable_gemini_pauses_the_book_and_it_resumes_where_it_was(tmp_p
     # (resumable, auto-resumed) instead of failing, and the resume requests
     # only the chunks still missing.
     config, conn = _setup(tmp_path, 5, "a")
+    # This checkout's lore.toml runs OpenRouter; these are Gemini's own
+    # pause paths (the free-tier ledger and its "unreachable" wording).
+    config = config.model_copy(update={
+        "llm": config.llm.model_copy(update={"provider": "gemini"})})
 
     class Flaky(Server):
         def handler(self, request):

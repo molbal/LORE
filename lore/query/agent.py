@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from lore.config import LoreConfig
 from lore.extract.embed import QUERY_PREFIX
 from lore.inference.gemini import GeminiClient
+from lore.inference.embedding import embed_model_for, make_embedder
 from lore.inference.providers import factory as providers
 from lore.inference.ollama import OllamaProvider
 from lore.ingest.registry import book_rows, list_books
@@ -223,12 +224,11 @@ def make_query_embedder(
     An injected `ollama` is the caller's to share; `aclose` closes whichever
     provider is in use, once.
     """
-    local = ollama if ollama is not None else OllamaProvider(
-        config.ollama, timeout=OLLAMA_TIMEOUT_S
-    )
+    local = ollama if ollama is not None else make_embedder(
+        config, timeout=OLLAMA_TIMEOUT_S)
 
     async def embed(texts: list[str]) -> list[list[float]]:
-        return await local.embed(texts, model=config.extraction.embed_model_ollama)
+        return await local.embed(texts, model=embed_model_for(config))
 
     return QueryEmbedder(embed, local.aclose, local)
 

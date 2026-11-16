@@ -105,13 +105,101 @@ it only while developing.
 Packaging a wheel needs `cd web && npm run build` first: the built app in
 `lore/web/static` is what ships.
 
+## Running on OpenRouter
+
+One key, one endpoint, every model LORE needs: text models for reading,
+building the graph and answering, and an embedding model for the vectors. No
+Ollama, no Gemini key, no local server. This is how the checked-in
+`lore.toml` is set up for a single reader on one computer.
+
+1. **A key** from https://openrouter.ai/keys (`sk-or-...`). Put it in a file
+   only you can read, or in the environment:
+
+   ```bash
+   mkdir -p ~/.config/lore
+   printf 'OPENROUTER_API_KEY=sk-or-...\n' > ~/.config/lore/openrouter.env
+   chmod 600 ~/.config/lore/openrouter.env
+   ```
+
+   The variable `OPENROUTER_API_KEY` also works. The key is never read from
+   `lore.toml`, and one key serves the text models and the embeddings.
+
+2. **`lore.toml`**:
+
+   ```toml
+   [lore]
+   extraction_provider = "gemini"   # = the [lore.llm] model, i.e. OpenRouter here
+
+   [lore.llm]
+   provider = "openrouter"
+   model = "minimax/minimax-m3.1-flash"
+   models = ["minimax/minimax-m3.1-flash", "google/gemini-3.1-flash-lite"]
+   concurrency = 4
+   max_output_tokens = 8192
+   # fast_model = "google/gemini-3.1-flash-lite"   # a cheaper model for short steps
+
+   [lore.embedding]
+   provider = "openrouter"
+   model = "qwen/qwen3-embedding-8b"
+   dimensions = 768
+
+   [lore.selection]
+   provider = "gemini"
+   [lore.synthesis]
+   provider = "gemini"
+   [lore.adjudication]
+   provider = "gemini"
+   [lore.disambiguation]
+   enabled = true
+   ```
+
+   `model` is any model id on https://openrouter.ai/models. `models` is a
+   cascade: a 429 (rate limited), a 503 (upstream overloaded) or a 404 (not
+   available to your key) moves to the next id instead of sleeping. The
+   settings named `"gemini"` keep their meaning — "this step runs on the
+   remote model `[lore.llm]` picks" — so nothing else in the file changes.
+
+3. **Embeddings** go through OpenRouter's `/embeddings` with `dimensions =
+   768`, the width LORE's stores are declared with (`lore.db.lance_store`).
+   The model must stay the same for a library's whole life: chunks are
+   embedded once, at extraction, and questions are embedded with the same
+   model afterwards. Changing `[lore.embedding] model` (or `dimensions`)
+   means re-processing every book (`lore process <id> --force`, or delete
+   and add it again).
+
+4. **Check it, then run it:**
+
+   ```bash
+   uv sync
+   uv run lore doctor    # config, stores, embeddings (OpenRouter), model
+   cd web && npm install && npm run build && cd ..
+   uv run lore ui        # http://127.0.0.1:8766
+   ```
+
+   `lore doctor` cannot spend a request, so it checks that
+   `OPENROUTER_API_KEY` exists and the model name looks like an embedding
+   model; the first book you add is the real test of the key.
+
+- **Pricing:** OpenRouter bills your account per token; nothing is free
+  there. `minimax/minimax-m3.1-flash` is one of the cheapest capable models
+  (about $0.15 in / $0.60 out per million tokens), and a novel's processing
+  is roughly a million tokens. LORE shows its own estimate before processing
+  a book (it is never sent to OpenRouter; OpenRouter's dashboard is the
+  bill).
+- **Where a key would otherwise go:** there is no Gemini, Claude or OpenAI
+  account in this setup, so `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` and
+  `OPENAI_API_KEY` are ignored. `[lore.llm] provider = "openrouter"` is a
+  local-mode provider: the hosted multi-user server refuses it (there the
+  server's key would pay for everyone).
+
 ## Running fully local
 
 LORE can run with no cloud key at all: every model step on a model you serve
 yourself, from any server that speaks OpenAI's chat completions API —
 llama.cpp's `llama-server`, vLLM, LM Studio, or Ollama's `/v1` endpoint.
-Embeddings stay on Ollama as always (`ollama pull nomic-embed-text`), so keep
-Ollama running too.
+Embeddings can also run locally on Ollama (`ollama pull nomic-embed-text`),
+by leaving `[lore.embedding]` at its default (`provider = "ollama"`), so
+keep Ollama running in that case.
 
 With `llama-server` (e.g. `llama-server -m qwen-28b-q4_k_m.gguf --port 8080
 --jinja -c 32768`), put this in `lore.toml`:

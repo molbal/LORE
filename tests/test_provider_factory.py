@@ -7,6 +7,7 @@ with their own key, and never Gemini or the server's key. Local mode:
 test_gemini_golden.py. All offline."""
 import asyncio
 import json
+import os
 from types import SimpleNamespace as NS
 
 import pytest
@@ -165,8 +166,13 @@ def test_local_mode_reads_the_env_then_the_key_file(clean_env, monkeypatch, buil
     path.parent.mkdir(parents=True)
     path.write_text(f"ANTHROPIC_API_KEY={ALICE_CLAUDE}\n")
     path.chmod(0o644)
-    with pytest.raises(gemini.GeminiKeyFileError):
-        factory.credentials(cfg)
+    if os.name == "nt":
+        # No POSIX modes on Windows: a key file cannot be world-readable
+        # there, so there is nothing to refuse (lore.inference.keyfile).
+        path.chmod(0o600)
+    else:
+        with pytest.raises(gemini.GeminiKeyFileError):
+            factory.credentials(cfg)
     path.chmod(0o600)
     creds = factory.credentials(cfg)
     assert (creds.provider, creds.key, creds.model) == ("anthropic", ALICE_CLAUDE, None)

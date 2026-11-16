@@ -38,7 +38,9 @@ def session(url):
 def test_default_url_is_a_sqlite_file_beside_the_data_root(tmp_path, monkeypatch):
     monkeypatch.delenv("LORE_DATABASE_URL", raising=False)
     cfg = LoreConfig(data_dir=tmp_path / "d")
-    assert central.database_url(cfg) == f"sqlite:///{(tmp_path / 'd').resolve()}/central.db"
+    # A URL path, always with forward slashes (see lore.central.db.default_url).
+    expected = f"sqlite:///{(tmp_path / 'd').resolve().as_posix()}/central.db"
+    assert central.database_url(cfg) == expected
     monkeypatch.setenv("LORE_DATABASE_URL", "postgresql://u:p@h/lore")
     assert central.database_url(cfg) == "postgresql://u:p@h/lore"
     assert central.make_engine("postgresql://u:p@h/lore").url.drivername == "postgresql+psycopg"

@@ -40,8 +40,10 @@ def test_writes_are_fsynced_before_the_rename(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setattr(fs.os, "replace",
                         lambda a, b: (order.append("replace"), real_replace(a, b))[1])
     fs.atomic_write_text(tmp_path / "f.json", "{}")
-    # The file's data first, then the rename, then the directory entry.
-    assert order == ["fsync", "replace", "fsync"]
+    # The file's data first, then the rename, then the directory entry. A
+    # Windows directory entry is not a file and cannot be fsynced at all.
+    expected = ["fsync", "replace"] if os.name == "nt" else ["fsync", "replace", "fsync"]
+    assert order == expected
 
 
 def test_a_crash_before_the_rename_keeps_the_old_file(tmp_path: Path, monkeypatch) -> None:

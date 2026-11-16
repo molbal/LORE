@@ -43,7 +43,7 @@ looks past your chapter.
 - **Questions across a series.** How a character changes from book one to book five, how a world or magic system works, who knows whom.
 - **Deep dives.** Long, sectioned analyses with LORE's reading, the other side, and what the books leave open, all cited.
 - **Explore the graph.** Click any character for a profile, a story timeline and their relationships, each with the passage behind it.
-- **Bring your own model.** Gemini (the free tier works), Claude or OpenAI for reading and writing; embeddings run locally on Ollama.
+- **Bring your own model.** Gemini (the free tier works), Claude or OpenAI, or any model on [OpenRouter](https://openrouter.ai) behind one key; embeddings run locally on Ollama or on OpenRouter.
 - **Use it from Claude.** An MCP server lets claude.ai, Claude Desktop, Claude Code or any MCP client search your library and ask LORE questions.
 - **Private by design.** Self-host it on your own machine, or use the hosted beta where each reader's library is kept separately.
 
@@ -69,9 +69,9 @@ docker compose logs lore | grep "setup code"   # a one-time code
 # open http://localhost:8080, enter the code and create the admin account
 ```
 
-Choose the AI model on the admin page: Gemini, Claude or OpenAI with your key,
-or a model you run yourself (llama.cpp's llama-server, vLLM, LM Studio,
-Ollama). Each person you add gets their own private library. The
+Choose the AI model on the admin page: Gemini, Claude, OpenAI or OpenRouter
+with your key, or a model you run yourself (llama.cpp's llama-server, vLLM,
+LM Studio, Ollama). Each person you add gets their own private library. The
 [self-hosting guide](docs/self-hosting.md) covers requirements, a local model
 step by step, adding people, upgrades, backups, HTTPS and troubleshooting.
 
@@ -80,32 +80,40 @@ step by step, adding people, upgrades, backups, HTTPS and troubleshooting.
 For development, or a single-user install with no Docker.
 
 **Prerequisites:** [Python 3.12+](https://www.python.org/downloads/),
-[uv](https://docs.astral.sh/uv/getting-started/installation/),
-[Node.js 18+](https://nodejs.org/) and [Ollama](https://ollama.com/download).
+[uv](https://docs.astral.sh/uv/getting-started/installation/) and
+[Node.js 18+](https://nodejs.org/). No local model server is needed if you use
+OpenRouter (or Gemini): the embeddings go with the model key.
+
+The checked-in `lore.toml` runs everything on **OpenRouter** — one key, one
+endpoint, text and embeddings:
 
 ```bash
-# 1. The local embedding model (keep Ollama running)
-ollama pull nomic-embed-text
+# 1. An OpenRouter key from https://openrouter.ai/keys (sk-or-...)
+mkdir -p ~/.config/lore
+printf 'OPENROUTER_API_KEY=sk-or-your-key-here\n' > ~/.config/lore/openrouter.env
+chmod 600 ~/.config/lore/openrouter.env        # Windows: skip the chmod
 
-# 2. A model key: a free Gemini key from https://aistudio.google.com/apikey
-export GEMINI_API_KEY=your-key-here
-
-# 3. Install, and check everything is in place
+# 2. Install, and check everything is in place
 git clone https://github.com/Jatin-Roopchandani/LORE.git
 cd LORE
 uv sync
 uv run lore doctor
 
-# 4. Build the web app (once)
+# 3. Build the web app (once)
 cd web && npm install && npm run build && cd ..
 
-# 5. Start it
+# 4. Start it
 uv run lore ui
 ```
 
 Open **http://127.0.0.1:8766**, click **+ Add book**, and choose an EPUB or PDF
-you own. The Library panel shows processing as it goes (a novel takes a while on
-Gemini's free tier); when it's done, ask away.
+you own. The Library panel shows processing as it goes; when it's done, ask
+away. [Running on OpenRouter](docs/guide.md#running-on-openrouter) has the
+model settings, the embedding model and what changing it later costs.
+
+With a Gemini, Claude or OpenAI key instead, set `[lore.llm] provider` in
+`lore.toml`; keeping *any* model on a local server (and embeddings on Ollama)
+is [Running fully local](docs/guide.md#running-fully-local).
 
 Prefer the command line? `lore ingest`, `lore process` and `lore ask` do the
 same; see the [user guide](docs/guide.md). Instead of the environment variable,

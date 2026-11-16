@@ -34,7 +34,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lore.inference import key_scope
+from lore.inference import key_scope, keyfile
 from lore.inference.gemini import PROCESSING_PATIENCE, GeminiClient, GeminiKeyFileError
 from lore.inference.key_scope import KeyRequired
 from lore.inference.providers import roles
@@ -44,11 +44,13 @@ from lore.inference.providers.base import (
     LABELS,
     OPENAI,
     OPENAI_COMPATIBLE,
+    OPENROUTER,
     TextModel,
 )
 
 KEY_VARIABLES = {ANTHROPIC: "ANTHROPIC_API_KEY", OPENAI: "OPENAI_API_KEY",
-                 OPENAI_COMPATIBLE: "LORE_LLM_API_KEY"}
+                 OPENAI_COMPATIBLE: "LORE_LLM_API_KEY",
+                 OPENROUTER: "OPENROUTER_API_KEY"}
 # The key file's name, when it is not the provider's: ~/.config/lore/llm.env.
 _KEY_FILE_NAMES = {OPENAI_COMPATIBLE: "llm"}
 # The key of an OpenAI-compatible server that needs none: truthy, so the call
@@ -63,24 +65,26 @@ class Credentials:
     model: str | None = None
     fast_model: str | None = None
     base_url: str | None = None
+    # openrouter: the ordered cascade from `[lore.llm] models`, if any.
+    models: tuple[str, ...] = ()
 
 
 def key_file(provider: str) -> Path:
     """`~/.config/lore/<provider>.env` (llm.env for openai_compatible), next to
-    gemini.env."""
+    gemini.env. OpenRouter's is `openrouter.env`."""
     name = _KEY_FILE_NAMES.get(provider, provider)
-    return Path.home() / ".config" / "lore" / f"{name}.env"
+    return keyfile.key_file(name)
 
 
 def _key_from_file(path: Path, variable: str) -> str | None:
     if key_scope.server_key_forbidden():
         raise KeyRequired()
     try:
-        info = path.stat()
+        path.stat()
     except FileNotFoundError:
         return None
-    mode = stat.S_IMODE(info.st_mode)
-    if mode & ~0o600:
+    if not keyfile.mode_is_private(path):
+        mode = stat.S_IMODE(path.stat().st_mode)
         raise GeminiKeyFileError(
             f"refusing to read {path}: its mode is {oct(mode)[2:]}, which lets"
             f" someone other than its owner read it. Run `chmod 600 {path}`.")
@@ -139,8 +143,14 @@ def gemini_paid(config) -> bool:
 
 def on_gemini(config) -> bool:
     """True when Gemini's free-tier ledger and answer reserve apply: Gemini,
-    and not a paid Gemini plan (which is metered like Claude and OpenAI)."""
-    return active_provider(config) == GEMINI and not gemini_paid(config)
+    and not a paid Gemini plan (which is metered like Claude and OpenAI).
+
+    An OpenRouter run has no Gemini ledger either: its key is the server's
+    own, so the reserve would stop a book for a quota that does not exist."""
+    provider = active_provider(config)
+    if provider == OPENROUTER:
+        return False
+    return provider == GEMINI and not gemini_paid(config)
 
 
 def credentials(config, explicit: str | None = None, *,
@@ -157,9 +167,11 @@ def credentials(config, explicit: str | None = None, *,
                                scope.fast_model, base_url=scope.base_url)
         from lore.inference.providers.openai_compatible import MultiUserRefused
         raise MultiUserRefused()
-    if config.llm.provider == OPENAI_COMPATIBLE and key_scope.multi_user_enabled():
-        # lore.toml's local model is for a local install only, self-host
-        # mode included: there the admin sets it in the web app.
+    if config.llm.provider in (OPENAI_COMPATIBLE, OPENROUTER) \
+            and key_scope.multi_user_enabled():
+        # lore.toml's local model (a server or the OpenRouter gateway on the
+        # server's key) is for a local install only, self-host mode included:
+        # there the admin sets it in the web app.
         from lore.inference.providers.openai_compatible import MultiUserRefused
         raise MultiUserRefused()
     if scope is not None and scope.provider != GEMINI:
@@ -181,7 +193,9 @@ def credentials(config, explicit: str | None = None, *,
                 f" `{KEY_VARIABLES[provider]}=...` in {key_file(provider)} with"
                 ' mode 600. Or set provider = "gemini".')
         return Credentials(provider, key, config.llm.model or None,
-                           config.llm.fast_model or None)
+                           config.llm.fast_model or None,
+                           base_url=config.llm.base_url or None,
+                           models=tuple(config.llm.models or ()))
     return Credentials(GEMINI, key_scope.gemini_api_key(explicit, local=local))
 
 
@@ -198,6 +212,9 @@ def model_for(creds: Credentials, site: str) -> str:
         return chosen
     if not chosen and creds.provider == OPENAI_COMPATIBLE:
         raise ValueError('[lore.llm] provider = "openai_compatible" needs model')
+    if not chosen and creds.provider == OPENROUTER:
+        raise ValueError('[lore.llm] provider = "openrouter" needs model (a model'
+                         " id from openrouter.ai/models)")
     if not chosen:
         raise ValueError("choose an OpenAI model first (LORE never assumes one)")
     return chosen
@@ -250,6 +267,21 @@ def _build_other(creds: Credentials, config, site: str) -> TextModel:
             base_url=creds.base_url or config.llm.base_url,
             model=model_for(creds, site), concurrency=config.llm.concurrency,
             max_tokens=config.llm.max_output_tokens)
+    if creds.provider == OPENROUTER:
+        from lore.inference.providers.openai_compatible import refuse_in_multi_mode
+        from lore.inference.providers.openrouter_model import OpenRouterTextModel
+        refuse_in_multi_mode()
+        # The cascade is shared by every site: it is capacity, not a role, so
+        # this site's model only moves to the front (that is `fast_model` on
+        # the short steps). Ties are kept once.
+        chosen = model_for(creds, site)
+        order = [chosen, creds.model, *creds.models]
+        models = list(dict.fromkeys(m for m in order if m))
+        return OpenRouterTextModel(
+            creds.key, models=models, model=chosen,
+            base_url=creds.base_url or config.llm.base_url or "",
+            max_tokens=config.llm.max_output_tokens,
+            concurrency=max(1, config.llm.concurrency))
     raise ValueError(f"unknown provider {creds.provider!r}")
 
 

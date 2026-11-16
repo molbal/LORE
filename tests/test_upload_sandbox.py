@@ -3,6 +3,7 @@ time, CPU and memory limits, its answer checked, and the web process never
 opening the untrusted file itself."""
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -48,6 +49,8 @@ def test_the_wall_clock_timeout_kills_the_child(book):
 
 
 def test_the_cpu_limit_stops_the_child(book):
+    if os.name == "nt":
+        pytest.skip("RLIMIT_CPU is POSIX-only (lore.ingest.sandbox._limit_self)")
     with pytest.raises(Refused) as caught:
         parse_untrusted(book, "epub", "b", Limits(),
                         SandboxLimits(cpu_seconds=1, wall_seconds=30), _selftest="spin")
@@ -55,6 +58,8 @@ def test_the_cpu_limit_stops_the_child(book):
 
 
 def test_the_memory_limit_stops_the_child(book):
+    if os.name == "nt":
+        pytest.skip("RLIMIT_AS is POSIX-only (lore.ingest.sandbox._limit_self)")
     with pytest.raises(Refused) as caught:
         parse_untrusted(book, "epub", "b", Limits(),
                         SandboxLimits(memory_bytes=512 * 1024 * 1024), _selftest="allocate")

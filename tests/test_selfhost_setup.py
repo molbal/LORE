@@ -1,5 +1,6 @@
 """Self-host mode: the first-run admin, created exactly once, and the gate
 that holds every other route until it exists."""
+import os
 import threading
 
 import pytest
@@ -243,7 +244,8 @@ def test_the_code_is_kept_in_the_data_root_and_survives_a_restart(tmp_path):
     path = tmp_path / "root" / SETUP_CODE_FILE
     code = code_of(app)
     assert path.read_text().strip() == code
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":  # Windows has POSIX modes; the profile's ACL applies
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     import re
     assert re.fullmatch(r"[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}", code)
     again = started(LoreConfig(data_dir=tmp_path / "root"), sessions)

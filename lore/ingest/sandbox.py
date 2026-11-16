@@ -48,6 +48,12 @@ ENV_CPU = "LORE_PARSE_CPU_SECONDS"
 ENV_MEMORY = "LORE_PARSE_MEMORY_MB"
 ENV_TIMEOUT = "LORE_PARSE_TIMEOUT_SECONDS"
 MAX_OUTPUT = 768 * 1024 * 1024  # the answer: chunk text is at most the book's own text
+# Signals that mean the child hit a limit (SIGXCPU past RLIMIT_CPU, or the
+# kill the parent sent). Neither exists on Windows, where the parent's
+# wall-clock timeout kills the child instead (return code 1: not a signal).
+_KILLED_BY_LIMIT = frozenset(
+    s for s in (getattr(signal, "SIGXCPU", None), getattr(signal, "SIGKILL", None))
+    if s is not None)
 
 
 @dataclass(frozen=True)
@@ -92,6 +98,34 @@ TOO_COMPLEX = Refused("too_complex", "this book is too large or complex to read 
 UNREADABLE = Refused("not_a_book", "this book could not be read")
 
 
+def _python_command() -> list[str]:
+    """The child's command line.
+
+    `-I` (isolated) still applies. On Windows it would also drop the parent's
+    `sys.path` entries, and LORE is imported from a source checkout there (a
+    `uv run` venv, not site-packages), so the module could not be found:
+    PYTHONPATH is put back in the child's environment instead (see
+    `_child_env`), which `-I` would otherwise ignore on every platform.
+    """
+    return [sys.executable, "-I", "-m", "lore.ingest.sandbox"]
+
+
+def _child_env() -> dict[str, str]:
+    """The child's environment: a minimal one, plus the import path LORE
+    needs when it runs from a checkout rather than an installed wheel."""
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8"}
+    if os.name == "nt":
+        # Windows needs these to start an interpreter and find its DLLs.
+        for name in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE",
+                     "PATHEXT", "COMSPEC"):
+            if os.environ.get(name):
+                env[name] = os.environ[name]
+    roots = [p for p in sys.path if p and Path(p).is_dir()]
+    if roots:
+        env["PYTHONPATH"] = os.pathsep.join(roots)
+    return env
+
+
 def parse_untrusted(path: Path, kind: str, book_id: str, checks: Limits,
                     limits: SandboxLimits | None = None, *,
                     _selftest: str | None = None) -> Parsed:
@@ -103,10 +137,9 @@ def parse_untrusted(path: Path, kind: str, book_id: str, checks: Limits,
     if _selftest:  # tests only: make the child misbehave on purpose
         request["selftest"] = _selftest
     proc = subprocess.Popen(
-        [sys.executable, "-I", "-m", "lore.ingest.sandbox"],
+        _python_command(),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        cwd=str(path.parent), start_new_session=True,
-        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8"})
+        cwd=str(path.parent), start_new_session=True, env=_child_env())
     out = bytearray()
     over = threading.Event()
 
@@ -138,7 +171,7 @@ def parse_untrusted(path: Path, kind: str, book_id: str, checks: Limits,
     reader.join(5)
     if over.is_set():
         raise TOO_COMPLEX
-    if proc.returncode in (-signal.SIGXCPU, -signal.SIGKILL):
+    if proc.returncode < 0 and -proc.returncode in _KILLED_BY_LIMIT:
         raise TOO_COMPLEX
     try:
         answer = json.loads(bytes(out))
@@ -148,6 +181,15 @@ def parse_untrusted(path: Path, kind: str, book_id: str, checks: Limits,
 
 
 def _kill(proc: subprocess.Popen) -> None:
+    """Stop the child and anything it started."""
+    if os.name == "nt":
+        # No process groups to signal; the child is the only process that
+        # matters (it starts no others), and terminate() is SIGTERM's peer.
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        return
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
@@ -200,7 +242,17 @@ def _rebuild(answer) -> Parsed:
 # --- the child ------------------------------------------------------------------
 
 def _limit_self(cpu: int, memory: int) -> None:
-    import resource
+    """Limit this child: CPU seconds and address space.
+
+    POSIX sets RLIMIT_CPU and RLIMIT_AS. Windows has neither; a session-wide
+    Job Object would be the equivalent, and it is not created here: the
+    parent's wall-clock timeout and output cap still apply, and a Windows
+    single-user install is not the multi-user server this sandbox protects.
+    """
+    try:
+        import resource
+    except ImportError:  # Windows
+        return
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 5))
     resource.setrlimit(resource.RLIMIT_AS, (memory, memory))

@@ -395,7 +395,7 @@ def test_a_unit_whose_embedding_failed_spends_no_request(tmp_path) -> None:
         try:
             loop.run(tier.run(units[0], tmp_path / "u0", next_unit=units[1]))
             asked = len(model.asked)
-            with pytest.raises(ExtractionHalted, match="no Gemini request was spent"):
+            with pytest.raises(ExtractionHalted, match="no model request was spent"):
                 loop.run(tier.run(units[1], tmp_path / "u1"))
             assert len(model.asked) == asked == 10
         finally:

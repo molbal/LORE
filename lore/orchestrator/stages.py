@@ -438,12 +438,18 @@ def _codex_client(config) -> GeminiClient:
 
 
 def _local_embedder(config):
-    """(embed, aclose) on the local Ollama embedder, as the loader uses."""
-    from lore.graph.adjudicate import _embedder
-    from lore.inference.ollama import OllamaProvider
+    """(embed, aclose) on the configured embedder, as the loader uses."""
+    from lore.extract.embed import DOCUMENT_PREFIX
+    from lore.inference.embedding import embed_model_for, make_embedder
 
-    provider = OllamaProvider(config.ollama)
-    return _embedder(config, provider), provider.aclose
+    embedder = make_embedder(config)
+    model = embed_model_for(config)
+
+    async def embed(texts: list[str]) -> list[list[float]]:
+        return await embedder.embed([DOCUMENT_PREFIX + text for text in texts],
+                                    model=model)
+
+    return embed, embedder.aclose
 
 
 def _open_graph(config):
